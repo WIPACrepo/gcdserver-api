@@ -20,11 +20,4 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-=======
-.env
-target/
-*.swp
-*.swo
-.DS_Store
-*.log
->>>>>>> 63d775f (first commit of vibe coded gcdserver API in rust)
+

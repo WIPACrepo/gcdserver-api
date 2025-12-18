@@ -1,3 +1,5 @@
+# WARNING THIS IS COMPLETELY VIBE CODED AT THE MOMENT.... DO NOT DEPLOY
+
 # GCDServer REST API
 
 A Rust-based RESTful API for interacting with GCDServer data, abstracting away direct MongoDB interactions.

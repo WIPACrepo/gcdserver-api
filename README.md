@@ -79,6 +79,12 @@ src/
 - `PUT /config/{key}` - Update configuration
 - `DELETE /config/{key}` - Delete configuration
 
+### GCD Collection (Geometry, Calibration, Detector Status) - *Planned*
+- `POST /gcd/generate/{run_number}` - Generate complete GCD collection for a run
+  - Creates all geometry, calibration, and detector status data in a single atomic operation
+  - Requires valid run number and authentication
+  - Returns combined GCD collection with metadata
+
 ## Installation
 
 ### Prerequisites
@@ -352,6 +358,9 @@ requests.post(
 
 ## Future Enhancements
 
+## Future Enhancements
+
+- **GCD Collection Generation** - Single endpoint to atomically generate complete Geometry, Calibration, and Detector Status collections for a given run number
 - Token blacklisting/revocation support
 - Batch operations support
 - Query filtering and pagination

@@ -36,6 +36,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .configure(api::health::routes)
             .configure(api::auth::routes)
+            .configure(api::gcd::routes)
             .configure(api::calibration::routes)
             .configure(api::geometry::routes)
             .configure(api::detector_status::routes)

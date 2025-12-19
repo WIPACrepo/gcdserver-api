@@ -9,7 +9,6 @@ use actix_web::{web, App, HttpServer, middleware};
 use env_logger::Env;
 use log::info;
 use db::MongoClient;
-use auth::jwt::JwtManager;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -20,8 +19,6 @@ async fn main() -> std::io::Result<()> {
         .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
     let database_name = std::env::var("DATABASE_NAME")
         .unwrap_or_else(|_| "gcdserver".to_string());
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
 
     info!("Connecting to MongoDB at {}", mongodb_uri);
     
@@ -30,14 +27,12 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to initialize MongoDB client");
 
     let mongo_data = web::Data::new(mongo_client);
-    let jwt_manager = web::Data::new(JwtManager::new(&jwt_secret, 24));
 
     info!("Starting GCDServer REST API on http://0.0.0.0:8080");
 
     HttpServer::new(move || {
         App::new()
             .app_data(mongo_data.clone())
-            .app_data(jwt_manager.clone())
             .wrap(middleware::Logger::default())
             .configure(api::health::routes)
             .configure(api::auth::routes)

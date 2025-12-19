@@ -7,14 +7,14 @@ A Rust-based RESTful API for interacting with GCDServer data, abstracting away d
 ## Features
 
 - RESTful API endpoints for Calibration, Geometry, Detector Status, and Configuration data
-- **OpenID Connect / OAuth2 authentication with Keycloak support** (self-hosted identity provider)
-- **JWT tokens** for stateless, scalable authentication
+- **Keycloak OAuth2 authentication** - Direct token validation with RSA public keys
+- **Streamlined auth flow** - No intermediate JWT wrapping, uses Keycloak tokens directly
 - MongoDB integration with proper error handling
 - Structured logging with environment-based configuration
 - Actix-web framework for high performance
 - Type-safe database operations with Serde serialization
-- Scope-based authorization for fine-grained access control
-- Role-based access control (RBAC) via Keycloak
+- Role-based access control (RBAC) via Keycloak realm roles
+- Token validation middleware for protected endpoints
 
 ## Project Structure
 
@@ -23,7 +23,7 @@ src/
 ├── main.rs              # Application entry point
 ├── api/                 # REST API endpoints
 │   ├── mod.rs
-│   ├── auth.rs          # Authentication endpoints
+│   ├── auth.rs          # Authentication endpoints (Keycloak OAuth2)
 │   ├── calibration.rs   # Calibration endpoints
 │   ├── geometry.rs      # Geometry endpoints
 │   ├── detector_status.rs # Detector status endpoints
@@ -31,9 +31,8 @@ src/
 │   └── health.rs        # Health check endpoint
 ├── auth/                # Authentication & OAuth2
 │   ├── mod.rs
-│   ├── jwt.rs           # JWT token generation and verification
-│   ├── middleware.rs    # Authentication middleware
-│   └── oauth2.rs        # OAuth2 provider integration
+│   ├── middleware.rs    # Token validation middleware (RSA verification)
+│   └── oauth2.rs        # Keycloak OAuth2 integration
 ├── db.rs                # MongoDB client wrapper
 ├── errors.rs            # Error handling and API responses
 └── models.rs            # Data models and request/response types
@@ -45,11 +44,9 @@ src/
 - `GET /health` - Health check endpoint
 
 ### Authentication
-- `GET /auth/login` - Initiate OAuth2 login
-- `GET /auth/callback?code=...&state=...` - OAuth2 callback endpoint
-- `POST /auth/refresh` - Refresh access token (requires Bearer token)
-- `POST /auth/logout` - Logout (requires Bearer token)
-- `GET /auth/verify` - Verify token validity (requires Bearer token)
+- `POST /auth/login` - Initiate OAuth2 login (returns authorization URL)
+- `GET /auth/callback?code=...&state=...` - OAuth2 callback endpoint (exchanges code for Keycloak token)
+- `GET /auth/verify` - Verify Keycloak token validity (requires Bearer token)
 
 ### Calibration (requires authentication)
 - `GET /calibration` - Get all calibrations
@@ -107,16 +104,14 @@ The API uses environment variables for configuration. Create a `.env` file in th
 MONGODB_URI=mongodb://localhost:27017
 DATABASE_NAME=gcdserver
 
-# JWT
-JWT_SECRET=your-secret-key-change-in-production
-JWT_EXPIRATION_HOURS=24
-
-# Keycloak OpenID Connect
+# Keycloak OAuth2
 KEYCLOAK_ISSUER_URL=http://localhost:8080/auth/realms/gcdserver
 KEYCLOAK_CLIENT_ID=gcdserver-api
 KEYCLOAK_CLIENT_SECRET=your-keycloak-client-secret
 KEYCLOAK_REDIRECT_URI=http://localhost:8080/auth/callback
 ```
+
+**Note:** The API validates Keycloak tokens using RSA public keys fetched from Keycloak's discovery endpoint. No additional JWT secret configuration is needed.
 
 ### Keycloak Setup
 
@@ -153,46 +148,57 @@ The API will start on `http://0.0.0.0:8080`
 
 ## Example Requests
 
-### 1. OpenID Connect Login (Keycloak)
+### 1. Keycloak OAuth2 Login Flow
 
 ```bash
-# Request login with nonce for security
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"nonce": "random-nonce-string"}'
+# 1. Get login authorization URL
+curl -X POST http://localhost:8080/auth/login
 
 # Response includes authorization URL
 {
   "authorization_url": "http://localhost:8080/auth/realms/gcdserver/protocol/openid-connect/auth?...",
-  "state": "random-state",
-  "nonce": "random-nonce-string"
+  "state": "random-state"
 }
 
-# User visits authorization_url and logs in
-# Keycloak redirects to: http://localhost:8080/auth/callback?code=AUTH_CODE&state=STATE
-# API automatically exchanges code for JWT token
-```
-
-### 2. OAuth2 Login Flow
-```bash
-# 1. Get login URL
-curl http://localhost:8080/auth/login
-
-# 2. User visits authorization URL and grants permission
-# 3. Provider redirects to callback with authorization code
-# 4. Exchange code for token
+# 2. User visits authorization_url and logs in with Keycloak
+# 3. Keycloak redirects to callback: http://localhost:8080/auth/callback?code=AUTH_CODE&state=STATE
+# 4. Exchange code for Keycloak token
 curl -X GET "http://localhost:8080/auth/callback?code=AUTH_CODE&state=STATE"
+
+# Response includes Keycloak access token
+{
+  "access_token": "eyJhbGciOiJSUzI1NiI...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "eyJhbGciOiJIUzI1NiI...",
+  "user": {
+    "id": "user-uuid",
+    "email": "user@example.com",
+    "name": "User Name",
+    "username": "username",
+    "roles": ["user", "admin"]
+  }
+}
 ```
 
-### Using Bearer Token
-```bash
-# Get token first via OAuth2 login, then use in requests
-TOKEN="eyJ0eXAiOiJKV1QiLCJhbGc..."
+### 2. Using Keycloak Bearer Token
 
-# Verify token
+```bash
+# Store token from OAuth2 callback response
+TOKEN="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# Verify token validity
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/auth/verify
 
-# Create calibration with authentication
+# Response shows token validity and claims
+{
+  "valid": true,
+  "user_id": "user-uuid",
+  "email": "user@example.com",
+  "roles": ["user", "admin"]
+}
+
+# Use token for authenticated API calls
 curl -X POST http://localhost:8080/calibration \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -209,13 +215,8 @@ curl -X POST http://localhost:8080/calibration \
     }
   }'
 
-# Refresh token
-curl -X POST http://localhost:8080/auth/refresh \
-  -H "Authorization: Bearer $TOKEN"
-
-# Logout
-curl -X POST http://localhost:8080/auth/logout \
-  -H "Authorization: Bearer $TOKEN"
+# Note: Token refresh is handled by Keycloak
+# Use the refresh_token from callback response if token expires
 ```
 
 ### Create Calibration
@@ -332,11 +333,26 @@ requests.post(
 )
 ```
 
+## Authentication Architecture
+
+### Token Flow
+1. **Login Request** → Client requests authorization URL from `/auth/login`
+2. **User Authentication** → User logs in via Keycloak
+3. **Authorization Code** → Keycloak redirects with authorization code
+4. **Token Exchange** → API exchanges code for Keycloak token at `/auth/callback`
+5. **Token Validation** → Middleware validates RSA-signed token on protected endpoints
+6. **Claims Extraction** → Validated claims attached to request for handler access
+
+### Token Validation
+- Keycloak tokens are RSA-256 signed
+- Public keys fetched from Keycloak's JWKS endpoint
+- Signature verification ensures token authenticity
+- Expiration checked automatically by middleware
+- Realm roles extracted from token claims
+
 ## Future Enhancements
 
-- Complete OAuth2 callback implementation for Google and GitHub
-- Role-based access control (RBAC)
-- Token blacklisting/revocation
+- Token blacklisting/revocation support
 - Batch operations support
 - Query filtering and pagination
 - Database migration tools
@@ -345,6 +361,7 @@ requests.post(
 - GraphQL interface
 - API rate limiting
 - Request signing for service-to-service authentication
+- Multi-realm Keycloak support
 
 ## License
 

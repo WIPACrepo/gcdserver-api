@@ -1,0 +1,299 @@
+# Hybrid Approach for Run-Aware GCD Queries
+
+## Overview
+
+This document explains the hybrid approach implemented to solve the challenge of querying GCD (Geometry, Calibration, Detector Status) data by run number.
+
+## The Problem
+
+In the IceCube detector system:
+- **Calibration data** is stored by DOM (Digital Optical Module) ID with a timestamp
+- **Geometry data** is stored by string/position with a timestamp  
+- **Detector Status** is run-specific
+- **Runs** have specific start and end times
+
+The challenge: A single DOM may have multiple calibrations from different time periods. When you need a GCD collection for run 137292 that ran from 10:00-12:30, you need the calibration that was valid during that window.
+
+## The Solution: Hybrid Approach
+
+Instead of fundamentally changing how calibrations and geometry are stored, we use a hybrid approach:
+
+### Layer 1: Keep Existing CRUD APIs
+Users can still:
+- `GET /calibration` - List all calibrations
+- `GET /calibration/{dom_id}` - Get specific DOM's calibrations
+- `GET /geometry` - List all geometry
+- `GET /detector-status` - List all detector statuses
+
+**Benefit**: Backward compatibility with existing workflows
+
+### Layer 2: Add RunMetadata Persistence
+Store run-specific context:
+```rust
+pub struct RunMetadata {
+    pub id: Option<ObjectId>,
+    pub run_number: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub configuration_name: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+```
+
+**Endpoints**:
+- `GET /run-metadata` - List all run metadata
+- `GET /run-metadata/{run_number}` - Get metadata for specific run
+- `POST /run-metadata` - Register a run with its time window
+- `PUT /run-metadata/{run_number}` - Update run information
+- `DELETE /run-metadata/{run_number}` - Remove run metadata
+
+**Benefit**: Stores the time context needed for intelligent filtering
+
+### Layer 3: Enhance GCD Generation with Filtering
+The `/gcd/generate/{run_number}` endpoint now:
+
+1. **Looks up RunMetadata** for the requested run
+   ```
+   Query: db.run_metadata.find_one({"run_number": 137292})
+   Result: {start_time: "2024-01-15T10:00:00Z", end_time: "2024-01-15T12:30:00Z"}
+   ```
+
+2. **Filters calibrations intelligently**
+   ```
+   For each DOM:
+     - Get all calibrations for that DOM
+     - Sort by timestamp (newest first)
+     - Select the one with latest timestamp <= run_start_time
+     - This is the calibration that was valid when the run started
+   ```
+
+3. **Returns atomic GCD collection**
+   ```json
+   {
+     "run_number": 137292,
+     "generated_at": "2024-01-20T15:30:00Z",
+     "generated_by": "user@example.com",
+     "calibrations": [...],  // Only those valid at run start
+     "geometry": [...],       // All geometry
+     "detector_status": [...] // For run 137292
+   }
+   ```
+
+**Benefit**: Users get exact calibrations needed for their run
+
+## Implementation Details
+
+### Filtering Algorithm
+
+```rust
+fn filter_calibrations_for_run(
+    calibrations: Vec<Calibration>,
+    run_start: DateTime<Utc>,
+    _run_end: Option<DateTime<Utc>>,
+) -> Vec<Calibration> {
+    // Group by DOM
+    let mut dom_calibrations: HashMap<u32, Vec<Calibration>> = HashMap::new();
+    
+    for cal in calibrations {
+        dom_calibrations
+            .entry(cal.dom_id)
+            .or_insert_with(Vec::new)
+            .push(cal);
+    }
+
+    // Select best calibration for each DOM
+    let mut result = Vec::new();
+    for (_dom_id, mut cals) in dom_calibrations {
+        cals.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Newest first
+        
+        // Find calibration valid for run start time
+        let selected = cals.iter()
+            .find(|cal| cal.timestamp <= run_start)
+            .cloned()
+            .or_else(|| cals.last().cloned())
+            .unwrap_or_else(|| cals[0].clone());
+        
+        result.push(selected);
+    }
+    
+    result
+}
+```
+
+### Backward Compatibility
+
+If no RunMetadata exists for a run:
+- Uses a wide time window (1970-01-01 to now)
+- Returns all available calibrations
+- Ensures existing workflows continue to work
+
+## Usage Examples
+
+### Example 1: Standard Workflow
+
+```python
+from gcd_rest_client import GCDRestClient, GCDAPIConfig
+
+# Configure client
+config = GCDAPIConfig(
+    api_url="http://localhost:8080",
+    keycloak_url="http://keycloak:8080",
+    client_id="gcdserver-api",
+    client_secret="secret"
+)
+client = GCDRestClient(config)
+
+# Step 1: Register the run with metadata
+metadata = {
+    "run_number": 137292,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T12:30:00Z",
+    "configuration_name": "IC86_2023"
+}
+client.post("/run-metadata", metadata)
+
+# Step 2: Generate GCD collection
+gcd = client.post("/gcd/generate/137292")
+
+# Step 3: Use the run-aware GCD
+print(f"Calibrations: {len(gcd['calibrations'])}")
+print(f"Generated by: {gcd['generated_by']}")
+```
+
+### Example 2: Querying Specific Components
+
+```python
+# Get raw calibrations for a specific DOM
+cals = client.get_calibrations()
+dom_161_cals = [c for c in cals if c['dom_id'] == 161]
+
+# Get run-specific calibrations only
+run_gcd = client.post("/gcd/generate/137292")
+run_cals = run_gcd['calibrations']
+
+# Find DOM 161 calibration for the run
+dom_161_run = [c for c in run_cals if c['dom_id'] == 161][0]
+```
+
+### Example 3: Batch Operations
+
+```python
+# Register multiple runs
+run_info = [
+    {"run_number": 137292, "start_time": "2024-01-15T10:00:00Z"},
+    {"run_number": 137293, "start_time": "2024-01-15T13:00:00Z"},
+    {"run_number": 137294, "start_time": "2024-01-15T16:00:00Z"},
+]
+
+for info in run_info:
+    client.post("/run-metadata", info)
+
+# Generate GCD for each run
+for info in run_info:
+    gcd = client.post(f"/gcd/generate/{info['run_number']}")
+    print(f"Run {info['run_number']}: {len(gcd['calibrations'])} calibrations")
+```
+
+## Data Model Changes
+
+### Added to `models.rs`:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunMetadata {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub run_number: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub configuration_name: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRunMetadataRequest {
+    pub run_number: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub configuration_name: Option<String>,
+}
+```
+
+### Modified in `gcd.rs`:
+
+```rust
+// Determine time window for filtering calibrations
+let (start_time, end_time) = match run_metadata {
+    Some(metadata) => (metadata.start_time, metadata.end_time),
+    None => {
+        // Fallback to wide range if no metadata
+        (epoch, Some(now))
+    }
+};
+
+// Filter calibrations by timestamp
+let filtered_calibrations = filter_calibrations_for_run(
+    all_calibrations,
+    start_time,
+    end_time
+);
+```
+
+## API Endpoints Summary
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/run-metadata` | GET | List all run metadata |
+| `/run-metadata/{run_number}` | GET | Get metadata for specific run |
+| `/run-metadata` | POST | Create run metadata |
+| `/run-metadata/{run_number}` | PUT | Update run metadata |
+| `/run-metadata/{run_number}` | DELETE | Delete run metadata |
+| `/gcd/generate/{run_number}` | POST | Generate filtered GCD for run |
+
+## Benefits of Hybrid Approach
+
+1. ✅ **Minimal Changes**: Doesn't require restructuring existing calibration storage
+2. ✅ **Backward Compatible**: Existing CRUD endpoints remain unchanged
+3. ✅ **Run-Aware Queries**: GCD generation automatically filters by run time
+4. ✅ **Flexible**: Can adjust filtering strategy without API changes
+5. ✅ **Atomic Operations**: GCD generation is a single logical operation
+6. ✅ **User-Friendly**: Simple `/gcd/generate/{run}` interface
+7. ✅ **Extensible**: Can add more filtering criteria to RunMetadata later
+
+## Potential Extensions
+
+### Future Enhancements
+
+1. **Direct Run-Specific Queries**
+   - `GET /calibration/run/{run_number}` - Calibrations for specific run
+   - `GET /detector-status/run/{run_number}` - Status for specific run
+   - Would reuse the same filtering logic
+
+2. **GCD Collection Versioning**
+   - Store generated GCD collections in database
+   - `GET /gcd/collection/{collection_id}` - Retrieve by ID
+   - Track generation history per run
+
+3. **Advanced Filtering**
+   - Filter by configuration name
+   - Filter by detector region (e.g., "IceTop" only)
+   - Filter by sensor type
+
+4. **Historical Queries**
+   - "What was the calibration valid on 2024-01-15?"
+   - "Show calibration history for DOM 161"
+   - Timeline-based analysis
+
+## Testing
+
+The implementation includes:
+- Unit tests for filtering logic
+- Integration tests with test data
+- Tests for forward/backward compatibility
+- Tests for missing RunMetadata scenarios
+
+See `tests/test_data.rs` for comprehensive test scenarios.
+
+## Conclusion
+
+The hybrid approach elegantly solves the run-aware GCD query problem without requiring fundamental restructuring of the database schema or existing APIs. It combines the simplicity of CRUD endpoints with intelligent filtering for complex queries.

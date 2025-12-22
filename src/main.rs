@@ -41,6 +41,8 @@ async fn main() -> std::io::Result<()> {
             .configure(api::geometry::routes)
             .configure(api::detector_status::routes)
             .configure(api::configuration::routes)
+            .configure(api::snow_height::routes)
+            .configure(api::run_metadata::routes)
     })
     .bind("0.0.0.0:8080")?
     .run()

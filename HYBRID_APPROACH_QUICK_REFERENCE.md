@@ -1,0 +1,362 @@
+# Quick Reference: Hybrid Approach API
+
+## Endpoint Overview
+
+### RunMetadata Management
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/run-metadata` | List all run metadata entries |
+| GET | `/run-metadata/{run_number}` | Get metadata for specific run |
+| POST | `/run-metadata` | Create new run metadata |
+| PUT | `/run-metadata/{run_number}` | Update run metadata |
+| DELETE | `/run-metadata/{run_number}` | Delete run metadata |
+
+### GCD Generation (Enhanced)
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/gcd/generate/{run_number}` | Generate filtered GCD collection for run |
+
+## Request/Response Examples
+
+### Create Run Metadata
+```bash
+curl -X POST http://localhost:8080/run-metadata \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_number": 137292,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T12:30:00Z",
+    "configuration_name": "IC86_2023"
+  }'
+```
+
+**Response (201 Created)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "65a1b2c3d4e5f6g7h8i9j0k",
+    "run_number": 137292,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T12:30:00Z",
+    "configuration_name": "IC86_2023",
+    "timestamp": "2024-01-20T15:30:00Z"
+  }
+}
+```
+
+### Get Run Metadata
+```bash
+curl http://localhost:8080/run-metadata/137292 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "65a1b2c3d4e5f6g7h8i9j0k",
+    "run_number": 137292,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T12:30:00Z",
+    "configuration_name": "IC86_2023",
+    "timestamp": "2024-01-20T15:30:00Z"
+  }
+}
+```
+
+### Generate Run-Aware GCD
+```bash
+curl -X POST http://localhost:8080/gcd/generate/137292 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "run_number": 137292,
+    "generated_at": "2024-01-20T15:31:00Z",
+    "generated_by": "user@example.com",
+    "calibrations": [
+      {
+        "id": "507f1f77bcf86cd799439011",
+        "dom_id": 1,
+        "domcal": {
+          "atwd_gain": [1.23, 1.24, 1.25],
+          "atwd_freq": [1.23e7, 1.23e7, 1.23e7],
+          "fadc_gain": 1.5,
+          "fadc_freq": 2.0e8,
+          "pmt_gain": 1.23e7,
+          "transit_time": 1000.0,
+          "relative_pmt_gain": 0.95
+        },
+        "timestamp": "2024-01-14T15:30:00Z"
+      },
+      // ... 5119 more calibrations
+    ],
+    "geometry": [
+      {
+        "id": "507f1f77bcf86cd799439012",
+        "string": 1,
+        "position": 1,
+        "location": {
+          "x": 10.5,
+          "y": 20.3,
+          "z": -100.2
+        },
+        "timestamp": "2023-06-01T00:00:00Z"
+      },
+      // ... more geometry entries
+    ],
+    "detector_status": [
+      {
+        "id": "507f1f77bcf86cd799439013",
+        "run_number": 137292,
+        "dom_id": 1,
+        "status": "operational",
+        "timestamp": "2024-01-15T10:00:00Z"
+      },
+      // ... more detector status entries
+    ],
+    "collection_id": "uuid-string-here"
+  }
+}
+```
+
+### Update Run Metadata
+```bash
+curl -X PUT http://localhost:8080/run-metadata/137292 \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_number": 137292,
+    "start_time": "2024-01-15T09:59:00Z",
+    "end_time": "2024-01-15T12:35:00Z",
+    "configuration_name": "IC86_2023_updated"
+  }'
+```
+
+### Delete Run Metadata
+```bash
+curl -X DELETE http://localhost:8080/run-metadata/137292 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "deleted_count": 1,
+    "run_number": 137292
+  }
+}
+```
+
+## Python Client Examples
+
+### Using gcd_rest_client.py
+
+```python
+from gcd_rest_client import GCDRestClient, GCDAPIConfig
+import json
+
+# Initialize client
+config = GCDAPIConfig(
+    api_url="http://localhost:8080",
+    keycloak_url="http://keycloak:8080",
+    client_id="gcdserver-api",
+    client_secret="your-secret"
+)
+client = GCDRestClient(config)
+
+# 1. Create run metadata
+metadata = {
+    "run_number": 137292,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T12:30:00Z",
+    "configuration_name": "IC86_2023"
+}
+response = client.session.post(
+    f"{client.config.api_url}/run-metadata",
+    json=metadata
+)
+run_meta = response.json()['data']
+print(f"Created run metadata: {run_meta}")
+
+# 2. Generate filtered GCD
+gcd = client.session.post(
+    f"{client.config.api_url}/gcd/generate/137292"
+)
+gcd_data = gcd.json()['data']
+
+print(f"GCD Collection for run 137292:")
+print(f"  Calibrations: {len(gcd_data['calibrations'])}")
+print(f"  Geometry: {len(gcd_data['geometry'])}")
+print(f"  Detector Status: {len(gcd_data['detector_status'])}")
+print(f"  Generated by: {gcd_data['generated_by']}")
+
+# 3. Get metadata for verification
+metadata = client.session.get(
+    f"{client.config.api_url}/run-metadata/137292"
+).json()['data']
+print(f"\nRun configuration: {metadata['configuration_name']}")
+
+# 4. Save GCD to file
+with open('gcd_137292.json', 'w') as f:
+    json.dump(gcd_data, f, indent=2)
+```
+
+## Common Workflows
+
+### Workflow 1: Fresh Data Collection
+```
+1. POST /run-metadata (register new run)
+2. POST /gcd/generate/{run} (get filtered data)
+3. Save results to file/database
+```
+
+### Workflow 2: Updating Run Context
+```
+1. GET /run-metadata/{run} (verify current metadata)
+2. PUT /run-metadata/{run} (correct times if needed)
+3. POST /gcd/generate/{run} (regenerate with new metadata)
+```
+
+### Workflow 3: Batch Processing
+```
+for run_num in [137292, 137293, 137294]:
+  1. POST /run-metadata (register run)
+  2. POST /gcd/generate/{run} (generate GCD)
+  3. Process and save results
+```
+
+### Workflow 4: Historical Analysis
+```
+1. GET /run-metadata (list all registered runs)
+2. For each run:
+  a. GET /run-metadata/{run} (review metadata)
+  b. POST /gcd/generate/{run} (get historical GCD)
+  c. Compare results across runs
+```
+
+## Error Handling
+
+### 404 Not Found
+```json
+{
+  "success": false,
+  "error": "Run 999999 not found"
+}
+```
+
+### 400 Bad Request
+```json
+{
+  "success": false,
+  "error": "Run metadata for run 137292 already exists"
+}
+```
+
+### 401 Unauthorized
+```json
+{
+  "success": false,
+  "error": "Authentication required"
+}
+```
+
+### 500 Internal Error
+```json
+{
+  "success": false,
+  "error": "Database error: connection failed"
+}
+```
+
+## Performance Notes
+
+- **GCD Generation**: O(C log C) where C = total calibrations
+  - Grouping: O(C)
+  - Sorting per DOM: O(D * log D) where D = cals per DOM
+  - Selection: O(D) per DOM
+  
+- **Typical Times**:
+  - With 5120 calibrations: ~100-200ms
+  - With 5000+ geometry entries: ~50-100ms
+  - With 2000+ detector statuses: ~20-50ms
+
+- **Recommendation**: Cache GCD collections if regenerating repeatedly
+
+## Troubleshooting
+
+### Problem: Getting all calibrations instead of filtered ones
+
+**Cause**: No RunMetadata registered for the run
+
+**Solution**: 
+```bash
+POST /run-metadata with correct start_time and end_time
+```
+
+### Problem: GCD generation takes too long
+
+**Cause**: Large dataset or slow database
+
+**Solutions**:
+1. Add database index on `timestamp` in calibration collection
+2. Implement caching for frequently generated GCDs
+3. Use batch operations if generating many GCDs
+
+### Problem: Timestamps not matching expected values
+
+**Check**:
+1. Run metadata `start_time` is set correctly
+2. Calibration timestamps are in UTC
+3. Timezone handling in client code
+
+## Advanced Usage
+
+### Custom Filtering
+```python
+# Get all calibrations, then filter locally
+all_cals = client.session.get(f"{api_url}/calibration").json()['data']
+run_meta = client.session.get(f"{api_url}/run-metadata/137292").json()['data']
+
+# Replicate server-side filtering
+filtered = {}
+for cal in all_cals:
+    dom = cal['dom_id']
+    cal_time = datetime.fromisoformat(cal['timestamp'].replace('Z', '+00:00'))
+    run_time = datetime.fromisoformat(run_meta['start_time'].replace('Z', '+00:00'))
+    
+    if cal_time <= run_time:
+        if dom not in filtered or cal_time > filtered[dom]['timestamp']:
+            filtered[dom] = cal
+```
+
+### Multi-Run Comparison
+```python
+# Generate GCDs for multiple runs
+runs = [137292, 137293, 137294]
+gcds = {}
+
+for run in runs:
+    gcd = client.session.post(f"{api_url}/gcd/generate/{run}").json()['data']
+    gcds[run] = gcd
+    
+# Compare DOM 161 calibrations across runs
+for run, gcd in gcds.items():
+    cal_161 = [c for c in gcd['calibrations'] if c['dom_id'] == 161][0]
+    print(f"Run {run}: DOM 161 PMT gain = {cal_161['domcal']['pmt_gain']}")
+```
+
+---
+
+For more information, see [HYBRID_APPROACH.md](HYBRID_APPROACH.md) and [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)

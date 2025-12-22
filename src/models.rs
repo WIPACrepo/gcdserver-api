@@ -63,6 +63,28 @@ pub struct Configuration {
     pub timestamp: DateTime<Utc>,
 }
 
+// Snow Height Models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnowHeight {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub run_number: u32,
+    pub height: f64,
+    pub timestamp: DateTime<Utc>,
+}
+
+// Run Metadata Models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunMetadata {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub run_number: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub configuration_name: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+
 // Request/Response Models
 #[derive(Debug, Deserialize)]
 pub struct CreateCalibrationRequest {
@@ -88,6 +110,20 @@ pub struct CreateDetectorStatusRequest {
 pub struct CreateConfigurationRequest {
     pub key: String,
     pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSnowHeightRequest {
+    pub run_number: u32,
+    pub height: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRunMetadataRequest {
+    pub run_number: u32,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub configuration_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

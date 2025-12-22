@@ -1,5 +1,5 @@
 // Keycloak authentication endpoints
-use actix_web::{web, HttpResponse, HttpRequest};
+use actix_web::{web, HttpResponse, HttpRequest, HttpMessage};
 use serde_json::json;
 use uuid::Uuid;
 use log::info;

@@ -453,6 +453,95 @@ When modifying the client:
 3. Update this README
 4. Test with actual API server
 
+## GCD Building Tools
+
+This package includes specialized tools for building complete GCD (Geometry, Calibration, DetectorStatus) collections, replacing the original `BuildGCD.py` functionality.
+
+### Files
+
+- **`gcd_rest_client.py`** - Full-featured REST API client with CRUD operations
+- **`build_gcd_rest.py`** - Command-line tool to generate GCD files
+
+### Quick Start - Building GCD
+
+```bash
+# Using command-line tool (simplest)
+export GCD_API_TOKEN="your-keycloak-token"
+python build_gcd_rest.py -r 137292 -o gcd.json
+
+# Using Python module (more control)
+python -c "
+from gcd_rest_client import GCDRestClient, GCDBuilder, GCDAPIConfig
+
+config = GCDAPIConfig(
+    api_url='http://localhost:8080',
+    bearer_token='your-token'
+)
+client = GCDRestClient(config)
+builder = GCDBuilder(client)
+builder.build_and_save(137292, 'gcd.json')
+"
+```
+
+### GCD Build Example
+
+```python
+from gcd_rest_client import GCDRestClient, GCDAPIConfig
+
+# Configure API access
+config = GCDAPIConfig(
+    api_url="http://localhost:8080",
+    bearer_token="your-keycloak-token"
+)
+client = GCDRestClient(config)
+
+# Generate complete GCD collection for a run
+gcd_collection = client.generate_gcd_collection(run_number=137292)
+
+# Access components
+print(f"Calibrations: {len(gcd_collection['calibrations'])}")
+print(f"Geometry: {len(gcd_collection['geometry'])}")
+print(f"Detector Status: {len(gcd_collection['detector_status'])}")
+
+# Get run-specific data (snow height, etc.)
+snow_height = client.get_snow_height(137292)
+if snow_height:
+    print(f"Snow height: {snow_height['height']} m")
+```
+
+### Comparison with Original BuildGCD.py
+
+| Feature | Original | REST API |
+|---------|----------|----------|
+| Database Access | Direct MongoDB | HTTP REST API |
+| Authentication | DB credentials | OAuth2 Bearer token |
+| Dependencies | IceTray, MongoDB driver | requests library |
+| Network | Local/LAN | Any HTTP client |
+| Use Cases | Local scripts | Containers, CI/CD, web services |
+
+### Command-Line Usage
+
+```bash
+# Basic usage
+python build_gcd_rest.py -r 137292 -o gcd.json
+
+# Custom API URL
+python build_gcd_rest.py -r 137292 -o gcd.json \
+  --api-url http://gcdserver:8080 \
+  --token YOUR_TOKEN
+
+# With environment variable
+export GCD_API_TOKEN="token"
+python build_gcd_rest.py -r 137292 -o gcd.json
+```
+
+### For More Information
+
+See docstrings in:
+- `gcd_rest_client.py` - Full API client documentation
+- `build_gcd_rest.py` - Command-line tool documentation
+- `examples.py` - Usage examples for all features
+
 ## License
 
 [Same as parent project]
